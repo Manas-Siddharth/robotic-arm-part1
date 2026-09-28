@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>5-DOF Dynamixel AX-12A Robotic Arm Control Panel</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="dark-theme">
+
+  <div class="app-container">
+    <!-- TOP HEADER NAVBAR -->
+    <header class="navbar glass-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <i class="fa-solid fa-robot"></i>
+        </div>
+        <div class="brand-title">
+          <h1>DYNAMIXEL ARM</h1>
+          <span class="sub-title">5-DOF AX-12A CONTROL SYSTEM</span>
+        </div>
+      </div>
+
+      <!-- STATUS BADGES -->
+      <div class="status-bar">
+        <div class="status-badge" id="badge-connection">
+          <span class="status-dot offline" id="dot-connection"></span>
+          <span class="badge-label">CONNECTION:</span>
+          <span class="badge-value" id="val-connection">CONNECTING...</span>
+        </div>
+
+        <div class="status-badge" id="badge-mode">
+          <i class="fa-solid fa-microchip"></i>
+          <span class="badge-label">MODE:</span>
+          <span class="badge-value" id="val-mode">SIMULATION</span>
+        </div>
+
+        <div class="status-badge ready" id="badge-system">
+          <i class="fa-solid fa-circle-check"></i>
+          <span class="badge-label">SYSTEM:</span>
+          <span class="badge-value" id="val-system">READY</span>
+        </div>
+
+        <div class="status-badge" id="badge-torque">
+          <i class="fa-solid fa-bolt"></i>
+          <span class="badge-label">TORQUE:</span>
+          <span class="badge-value" id="val-torque">OFF</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN DASHBOARD CONTENT -->
+    <main class="dashboard-grid">
+
+      <!-- LEFT COLUMN: JOINT CONTROL & SPEED -->
+      <section class="card glass-card joint-control-card">
+        <div class="card-header">
+          <h2><i class="fa-solid fa-sliders"></i> Joint Control</h2>
+          <div class="preset-actions">
+            <button class="btn btn-sm btn-outline" onclick="ArmControl.presetHome()">
+              <i class="fa-solid fa-house"></i> Home (150°)
+            </button>
+            <button class="btn btn-sm btn-outline" onclick="ArmControl.presetSleep()">
+              <i class="fa-solid fa-bed"></i> Sleep
+            </button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="joint-sliders-container" id="joint-sliders">
+            <!-- Dynamically populated J1-J5 sliders -->
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- SPEED CONTROL -->
+          <div class="speed-control-group">
+            <div class="speed-header">
+              <label for="speed-slider"><i class="fa-solid fa-gauge-high"></i> Movement Speed:</label>
+              <span class="speed-value" id="speed-val-display">100 (Raw)</span>
+            </div>
+            <div class="speed-input-wrapper">
+              <input type="range" id="speed-slider" min="1" max="1023" value="100" oninput="ArmControl.updateSpeedLabel(this.value)">
+              <div class="speed-presets">
+                <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(50)">Slow (50)</button>
+                <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(200)">Med (200)</button>
+                <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(500)">Fast (500)</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ACTION BUTTON -->
+          <div class="joint-action-buttons">
+            <button class="btn btn-primary btn-block btn-lg" id="btn-apply-move" onclick="ArmControl.applyMove()">
+              <i class="fa-solid fa-paper-plane"></i> MOVE JOINTS SYNCHRONIZED
+            </button>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- MIDDLE COLUMN: SAFETY & CONTROL ACTIONS -->
+      <section class="card-column">
+        <!-- EMERGENCY & TORQUE CARD -->
+        <div class="card glass-card safety-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-shield-halved"></i> Safety & Emergency Control</h2>
+          </div>
+          <div class="card-body estop-section">
+            <!-- LARGE E-STOP BUTTON -->
+            <button class="btn-estop" id="btn-estop" onclick="ArmControl.triggerEstop()">
+              <div class="estop-content">
+                <i class="fa-solid fa-triangle-exclamation estop-icon"></i>
+                <span class="estop-text">EMERGENCY STOP</span>
+              </div>
+            </button>
+
+            <div class="safety-buttons-row">
+              <button class="btn btn-warning" id="btn-clear-fault" onclick="ArmControl.clearFault()">
+                <i class="fa-solid fa-rotate-left"></i> CLEAR FAULT
+              </button>
+              <button class="btn btn-success" id="btn-torque-on" onclick="ArmControl.setTorque(true)">
+                <i class="fa-solid fa-bolt"></i> TORQUE ON
+              </button>
+              <button class="btn btn-secondary" id="btn-torque-off" onclick="ArmControl.setTorque(false)">
+                <i class="fa-solid fa-power-off"></i> TORQUE OFF
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TEACH / POSE MANAGEMENT CARD -->
+        <div class="card glass-card pose-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-bookmark"></i> Teach & Pose System</h2>
+          </div>
+          <div class="card-body">
+            <div class="pose-input-group">
+              <input type="text" id="pose-name-input" placeholder="Pose Name (e.g., PickPose)" class="form-input">
+              <button class="btn btn-primary" onclick="ArmControl.saveCurrentPose()">
+                <i class="fa-solid fa-floppy-disk"></i> Save Current
+              </button>
+            </div>
+
+            <div class="pose-list-header">
+              <span>Saved Poses</span>
+              <button class="btn btn-xs btn-outline" onclick="ArmControl.refreshPoses()"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+            </div>
+
+            <div class="pose-list" id="pose-list-container">
+              <p class="empty-list-msg">No saved poses found.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN / BOTTOM: LIVE TELEMETRY TABLE -->
+      <section class="card glass-card telemetry-card wide-card">
+        <div class="card-header">
+          <h2><i class="fa-solid fa-chart-line"></i> Live Telemetry & Servo Metrics</h2>
+          <div class="telemetry-hz">
+            <span>Rate: <strong id="telemetry-rate">10 Hz</strong></span>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="telemetry-table">
+              <thead>
+                <tr>
+                  <th>Joint</th>
+                  <th>Present Angle</th>
+                  <th>Goal Angle</th>
+                  <th>Speed</th>
+                  <th>Load</th>
+                  <th>Voltage</th>
+                  <th>Temp</th>
+                  <th>Torque</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="telemetry-table-body">
+                <!-- Dynamically populated servo telemetry rows -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- DIAGNOSTIC BAR -->
+          <div class="diagnostic-bar">
+            <div class="diag-item">
+              <span class="diag-label">Watchdog:</span>
+              <span class="diag-val" id="diag-watchdog">ACTIVE (5.0s)</span>
+            </div>
+            <div class="diag-item">
+              <span class="diag-label">Max Temp Limit:</span>
+              <span class="diag-val">70.0 °C</span>
+            </div>
+            <div class="diag-item">
+              <span class="diag-label">Last Command:</span>
+              <span class="diag-val" id="diag-last-cmd">None</span>
+            </div>
+            <div class="diag-item">
+              <span class="diag-label">Fault Log:</span>
+              <span class="diag-val fault-text" id="diag-fault-reason">None</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- TOAST NOTIFICATIONS CONTAINER -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- JavaScript Modules -->
+  <script src="js/telemetry.js"></script>
+  <script src="js/arm.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

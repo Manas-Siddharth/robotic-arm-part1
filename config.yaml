@@ -1,0 +1,40 @@
+# Dynamixel AX-12A 5-DOF Robotic Arm Configuration
+
+serial_port: "/dev/ttyUSB0"
+baud_rate: 1000000
+protocol: 1.0
+servo_ids: [1, 2, 3, 4, 5]
+
+# Simulation mode toggle (default true for off-hardware development)
+simulation: true
+
+# Joint software limits in degrees (AX-12A physical range: 0.0 - 300.0)
+joint_limits:
+  1:
+    min: 0.0
+    max: 300.0
+  2:
+    min: 15.0
+    max: 285.0
+  3:
+    min: 15.0
+    max: 285.0
+  4:
+    min: 10.0
+    max: 290.0
+  5:
+    min: 0.0
+    max: 300.0
+
+# Speed settings (0 - 1023)
+default_speed: 100
+
+# Safety thresholds
+watchdog_timeout: 5.0          # Seconds without command before watchdog trigger
+maximum_temperature: 70.0       # Max temperature in Celsius before torque cutoff
+
+# Telemetry streaming rate in Hz
+telemetry_frequency: 10.0
+
+# Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+logging_level: "INFO"
