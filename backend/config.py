@@ -31,6 +31,13 @@ class ArmConfig(BaseModel):
     maximum_temperature: float = 70.0
     telemetry_frequency: float = 10.0
     logging_level: str = "INFO"
+    trajectory_sample_rate: float = 20.0
+    trajectory_velocity_limits: Dict[int, float] = Field(default_factory=lambda: {
+        1: 180.0, 2: 150.0, 3: 150.0, 4: 180.0, 5: 200.0
+    })
+    trajectory_acceleration_limits: Dict[int, float] = Field(default_factory=lambda: {
+        1: 360.0, 2: 300.0, 3: 300.0, 4: 360.0, 5: 400.0
+    })
 
 def load_config(config_path: Optional[str] = None) -> ArmConfig:
     """Load configuration from config.yaml or return defaults if not found."""
@@ -60,6 +67,16 @@ def load_config(config_path: Optional[str] = None) -> ArmConfig:
                     max=float(v.get("max", 300.0))
                 )
             data["joint_limits"] = parsed_limits
+
+        # Parse trajectory settings if present
+        if "trajectory" in data and isinstance(data["trajectory"], dict):
+            traj = data["trajectory"]
+            if "sample_rate" in traj:
+                data["trajectory_sample_rate"] = float(traj["sample_rate"])
+            if "velocity_limits" in traj and isinstance(traj["velocity_limits"], dict):
+                data["trajectory_velocity_limits"] = {int(k): float(v) for k, v in traj["velocity_limits"].items()}
+            if "acceleration_limits" in traj and isinstance(traj["acceleration_limits"], dict):
+                data["trajectory_acceleration_limits"] = {int(k): float(v) for k, v in traj["acceleration_limits"].items()}
 
         config = ArmConfig(**data)
         logger.info(f"Loaded configuration from {config_path} (Simulation mode: {config.simulation})")

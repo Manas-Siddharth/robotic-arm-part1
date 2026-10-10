@@ -38,3 +38,19 @@ telemetry_frequency: 10.0
 
 # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 logging_level: "INFO"
+
+# Trajectory Planning (Phase 1)
+trajectory:
+  sample_rate: 20.0             # Sampling frequency in Hz for preview & execution
+  velocity_limits:              # Maximum joint velocity in deg/s
+    1: 180.0
+    2: 150.0
+    3: 150.0
+    4: 180.0
+    5: 200.0
+  acceleration_limits:          # Maximum joint acceleration in deg/s^2
+    1: 360.0
+    2: 300.0
+    3: 300.0
+    4: 360.0
+    5: 400.0

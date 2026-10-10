@@ -1,5 +1,4 @@
-"""Pydantic data models for REST API and WebSocket telemetry."""
-
+import time
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 
@@ -19,13 +18,15 @@ class ServoState(BaseModel):
 class SystemState(BaseModel):
     connected: bool = True
     simulation: bool = True
-    system_status: str = "READY"        # "READY", "MOVING", "ESTOP", "FAULT"
+    system_status: str = "READY"        # "READY", "MOVING", "ESTOP", "FAULT", "DISCONNECTED"
     torque_enabled: bool = True
     fault_latched: bool = False
     fault_reason: Optional[str] = None
     servos: Dict[int, ServoState] = Field(default_factory=dict)
     last_command_timestamp: Optional[float] = None
     watchdog_tripped: bool = False
+    active_control: bool = False
+    telemetry_timestamp: float = Field(default_factory=time.time)
 
 class MoveRequest(BaseModel):
     angles: Dict[int, float] = Field(
@@ -41,6 +42,11 @@ class XYZMoveRequest(BaseModel):
     pitch: Optional[float] = Field(0.0, description="Target wrist pitch angle in degrees")
     speed: Optional[int] = Field(100, ge=1, le=1023, description="Moving speed (1 - 1023)")
 
+class IKValidateResponse(BaseModel):
+    reachable: bool
+    angles: Optional[Dict[int, float]] = None
+    message: str
+
 class TorqueRequest(BaseModel):
     enable: bool
     joint_id: Optional[int] = None
@@ -51,8 +57,19 @@ class PoseModel(BaseModel):
     angles: Dict[int, float]
     speed: int = 100
 
+class SequenceStep(BaseModel):
+    pose_name: str
+    speed: Optional[int] = None
+    delay_seconds: float = 1.0
+
+class SequenceModel(BaseModel):
+    name: str
+    steps: List[SequenceStep]
+    timestamp: Optional[str] = None
+
 class PoseSequenceRequest(BaseModel):
-    pose_names: List[str]
+    pose_names: Optional[List[str]] = None
+    steps: Optional[List[SequenceStep]] = None
     delay_seconds: float = 1.0
     speed: Optional[int] = None
 
@@ -60,3 +77,25 @@ class APIResponse(BaseModel):
     success: bool
     message: str
     data: Optional[Any] = None
+
+
+# Trajectory Models (Phase 1)
+class WaypointModel(BaseModel):
+    angles: Dict[int, float] = Field(..., description="Target angles for joints 1-5")
+    duration: float = Field(2.0, ge=0.0, description="Duration in seconds from previous waypoint (0.0 for initial waypoint)")
+    name: Optional[str] = Field(None, description="Optional label for the waypoint")
+
+class TrajectoryPreviewRequest(BaseModel):
+    waypoints: List[WaypointModel] = Field(..., min_length=2, description="Sequence of at least 2 waypoints")
+    interpolation: str = Field("quintic", description="Interpolation mode: linear, cubic, quintic, cubic_spline")
+    sample_rate: Optional[float] = Field(20.0, gt=0, le=200, description="Sampling rate in Hz (default: 20)")
+    velocity_limits: Optional[Dict[int, float]] = None
+    acceleration_limits: Optional[Dict[int, float]] = None
+
+class TrajectoryExecuteRequest(BaseModel):
+    waypoints: List[WaypointModel] = Field(..., min_length=2, description="Sequence of at least 2 waypoints")
+    interpolation: str = Field("quintic", description="Interpolation mode: linear, cubic, quintic, cubic_spline")
+    sample_rate: Optional[float] = Field(20.0, gt=0, le=200, description="Sampling rate in Hz (default: 20)")
+    velocity_limits: Optional[Dict[int, float]] = None
+    acceleration_limits: Optional[Dict[int, float]] = None
+

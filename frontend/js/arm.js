@@ -14,7 +14,7 @@ const ArmAPI = {
     try {
       const resp = await fetch(url, opts);
       const json = await resp.json();
-      if (!resp.ok) {
+      if (!resp.ok || (json && json.success === false)) {
         throw new Error(json.message || `HTTP Error ${resp.status}`);
       }
       return json;
@@ -69,5 +69,97 @@ const ArmAPI = {
 
   async executePose(name) {
     return await this._request(`/api/poses/${encodeURIComponent(name)}/execute`, 'POST');
+  },
+
+  // Cartesian Endpoints
+  async getFK() {
+    return await this._request('/api/kinematics/fk');
+  },
+
+  async validateXYZ(x, y, z, pitch = 0.0) {
+    return await this._request('/api/kinematics/validate', 'POST', {
+      x: parseFloat(x),
+      y: parseFloat(y),
+      z: parseFloat(z),
+      pitch: parseFloat(pitch)
+    });
+  },
+
+  async moveXYZ(x, y, z, pitch = 0.0, speed = 100) {
+    return await this._request('/api/move_xyz', 'POST', {
+      x: parseFloat(x),
+      y: parseFloat(y),
+      z: parseFloat(z),
+      pitch: parseFloat(pitch),
+      speed: parseInt(speed)
+    });
+  },
+
+  // Sequence Endpoints
+  async listSequences() {
+    return await this._request('/api/sequences');
+  },
+
+  async saveSequence(name, steps) {
+    return await this._request('/api/sequences', 'POST', {
+      name: name,
+      steps: steps
+    });
+  },
+
+  async deleteSequence(name) {
+    return await this._request(`/api/sequences/${encodeURIComponent(name)}`, 'DELETE');
+  },
+
+  async executeSequence(steps, speed = 100, delaySeconds = 1.0) {
+    return await this._request('/api/poses/sequence', 'POST', {
+      steps: steps,
+      speed: parseInt(speed),
+      delay_seconds: parseFloat(delaySeconds)
+    });
+  },
+
+  async executeSavedSequence(name) {
+    return await this._request(`/api/sequences/${encodeURIComponent(name)}/execute`, 'POST');
+  },
+
+  // Trajectory Planning Endpoints (Phase 1)
+  async validateTrajectory(waypoints, interpolation = 'quintic', sampleRate = 20.0, velocityLimits = null, accelerationLimits = null) {
+    return await this._request('/api/trajectory/validate', 'POST', {
+      waypoints: waypoints,
+      interpolation: interpolation,
+      sample_rate: parseFloat(sampleRate),
+      velocity_limits: velocityLimits,
+      acceleration_limits: accelerationLimits
+    });
+  },
+
+  async previewTrajectory(waypoints, interpolation = 'quintic', sampleRate = 20.0, velocityLimits = null, accelerationLimits = null) {
+    return await this._request('/api/trajectory/preview', 'POST', {
+      waypoints: waypoints,
+      interpolation: interpolation,
+      sample_rate: parseFloat(sampleRate),
+      velocity_limits: velocityLimits,
+      acceleration_limits: accelerationLimits
+    });
+  },
+
+  async executeTrajectory(waypoints, interpolation = 'quintic', sampleRate = 20.0, velocityLimits = null, accelerationLimits = null) {
+    return await this._request('/api/trajectory/execute', 'POST', {
+      waypoints: waypoints,
+      interpolation: interpolation,
+      sample_rate: parseFloat(sampleRate),
+      velocity_limits: velocityLimits,
+      acceleration_limits: accelerationLimits
+    });
+  },
+
+  async cancelTrajectory() {
+    return await this._request('/api/trajectory/cancel', 'POST');
+  },
+
+  async getTrajectoryStatus() {
+    return await this._request('/api/trajectory/status');
   }
 };
+

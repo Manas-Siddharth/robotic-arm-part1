@@ -89,3 +89,57 @@ def test_poses_api():
     # Delete pose
     del_res = client.delete("/api/poses/TestHomePose")
     assert del_res.status_code == 200
+
+def test_kinematics_validate_api():
+    # Test valid reachable Cartesian coordinates within software joint limits
+    req_valid = {"x": 180.0, "y": 0.0, "z": 200.0, "pitch": 0.0}
+    res_valid = client.post("/api/kinematics/validate", json=req_valid)
+    assert res_valid.status_code == 200
+    json_valid = res_valid.json()
+    assert json_valid["success"] is True
+    assert json_valid["data"]["reachable"] is True
+    assert "angles" in json_valid["data"]
+
+
+    # Test unreachable Cartesian coordinates
+    req_unreachable = {"x": 800.0, "y": 800.0, "z": 800.0, "pitch": 0.0}
+    res_unreachable = client.post("/api/kinematics/validate", json=req_unreachable)
+    assert res_unreachable.status_code == 200
+    json_unreachable = res_unreachable.json()
+    assert json_unreachable["success"] is False
+    assert json_unreachable["data"]["reachable"] is False
+
+def test_sequences_api():
+    # 1. Save a pose to use in sequence
+    client.post("/api/poses", json={
+        "name": "SeqPose1",
+        "angles": {"1": 150, "2": 150, "3": 150, "4": 150, "5": 150},
+        "speed": 100
+    })
+
+    # 2. Save sequence
+    seq_payload = {
+        "name": "TestAutoSequence",
+        "steps": [
+            {"pose_name": "SeqPose1", "speed": 150, "delay_seconds": 0.1}
+        ]
+    }
+    save_res = client.post("/api/sequences", json=seq_payload)
+    assert save_res.status_code == 200
+    assert save_res.json()["success"] is True
+
+    # 3. List sequences
+    list_res = client.get("/api/sequences")
+    assert list_res.status_code == 200
+    seqs = list_res.json()["data"]
+    assert any(s["name"] == "TestAutoSequence" for s in seqs)
+
+    # 4. Execute sequence
+    exec_res = client.post("/api/sequences/TestAutoSequence/execute")
+    assert exec_res.status_code == 200
+
+    # 5. Delete sequence & pose
+    del_seq = client.delete("/api/sequences/TestAutoSequence")
+    assert del_seq.status_code == 200
+    client.delete("/api/poses/SeqPose1")
+

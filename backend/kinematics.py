@@ -123,10 +123,23 @@ class KinematicsController:
         """Compute IK for target XYZ and execute synchronized joint movement through Arm abstraction."""
         target_angles = self.solver.inverse_kinematics(x, y, z, pitch)
         self.safety_monitor.record_command()
-        return self.arm.move_joints(target_angles, speed=speed)
+        success = self.arm.move_joints(target_angles, speed=speed)
+        self.safety_monitor.end_movement_if_settled()
+        return success
 
     def get_end_effector_position(self) -> Dict[str, float]:
         """Get present end-effector position derived from current joint positions."""
         states = self.arm.get_state()
         angles = {sid: s.present_position for sid, s in states.items()}
         return self.solver.forward_kinematics(angles)
+
+    def validate_ik(self, x: float, y: float, z: float, pitch: float = 0.0) -> Dict[str, Any]:
+        """Validate if Cartesian coordinates are reachable and return calculated joint angles."""
+        try:
+            angles = self.solver.inverse_kinematics(x, y, z, pitch)
+            # Validate joint software limits as well
+            self.arm.validate_joint_limits(angles)
+            return {"reachable": True, "angles": angles, "message": "Target is reachable within joint software limits."}
+        except Exception as e:
+            return {"reachable": False, "angles": None, "message": str(e)}
+

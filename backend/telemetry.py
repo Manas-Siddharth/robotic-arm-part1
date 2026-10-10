@@ -46,14 +46,16 @@ class TelemetryManager:
                 sys_status = "ESTOP"
             else:
                 sys_status = "FAULT"
+        elif not self.arm.is_connected():
+            sys_status = "DISCONNECTED"
         else:
             sys_status = "READY"
 
         try:
             servos_dict = self.arm.get_state()
-            # If any servo is moving, status can be MOVING if not ESTOP/FAULT
+            # If any servo is enabled and moving, status is MOVING (unless ESTOP/FAULT/DISCONNECTED)
             if sys_status == "READY":
-                is_moving = any(abs(s.present_position - s.goal_position) > 0.5 for s in servos_dict.values())
+                is_moving = any(s.torque_enabled and abs(s.present_position - s.goal_position) > 0.5 for s in servos_dict.values())
                 if is_moving:
                     sys_status = "MOVING"
         except Exception as e:
@@ -71,7 +73,9 @@ class TelemetryManager:
             fault_reason=self.safety_monitor.fault_reason,
             servos=servos_dict,
             last_command_timestamp=self.safety_monitor.last_command_timestamp,
-            watchdog_tripped=self.safety_monitor.watchdog_tripped
+            watchdog_tripped=self.safety_monitor.watchdog_tripped,
+            active_control=self.safety_monitor.active_control,
+            telemetry_timestamp=time.time()
         )
 
     async def broadcast_state(self) -> None:

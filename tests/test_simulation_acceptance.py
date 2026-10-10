@@ -81,9 +81,9 @@ def test_full_simulation_acceptance_flow():
 
     # 14. Test watchdog under the intended active-control condition
     client.post("/api/torque/1")
-    # Issue a movement command to initiate active control
-    client.post("/api/move", json={"angles": {"1": 150.0}, "speed": 100})
-    # Wait >5s without issuing any new command
+    # Initiate active control session
+    client.post("/api/control_session/start")
+    # Wait >5s without issuing any new heartbeat or command
     time.sleep(5.2)
     watchdog_state = client.get("/api/state").json()
     assert watchdog_state["fault_latched"] is True

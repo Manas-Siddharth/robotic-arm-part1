@@ -45,15 +45,36 @@ def test_kinematics_controller_integration():
     assert success is True
     arm.disconnect()
 
-def test_xyz_api_endpoints():
-    # Test GET /api/kinematics/fk
-    fk_res = client.get("/api/kinematics/fk")
-    assert fk_res.status_code == 200
-    data = fk_res.json()["data"]
-    assert "x" in data and "z" in data
+def test_known_fk_configurations():
+    solver = KinematicsSolver()
 
-    # Test POST /api/move_xyz
-    move_payload = {"x": 180.0, "y": 0.0, "z": 150.0, "pitch": 0.0, "speed": 150}
-    res = client.post("/api/move_xyz", json=move_payload)
-    assert res.status_code == 200
-    assert res.json()["success"] is True
+    # 1. Home position (150° for all joints) -> Horizontal stretch along +X
+    home_res = solver.forward_kinematics({1: 150.0, 2: 150.0, 3: 150.0, 4: 150.0, 5: 150.0})
+    assert home_res["x"] == 300.0  # L2(105) + L3(105) + L4(90) = 300
+    assert home_res["y"] == 0.0
+    assert home_res["z"] == 145.0  # L1 = 145
+    assert home_res["pitch"] == 0.0
+
+    # 2. Vertical Up position (J2 = 240°, J1=J3=J4=J5=150°)
+    vert_res = solver.forward_kinematics({1: 150.0, 2: 240.0, 3: 150.0, 4: 150.0, 5: 150.0})
+    assert vert_res["x"] == 0.0
+    assert vert_res["y"] == 0.0
+    assert vert_res["z"] == 445.0  # L1(145) + L2(105) + L3(105) + L4(90) = 445
+    assert vert_res["pitch"] == 90.0
+
+def test_fk_ik_round_trip():
+    solver = KinematicsSolver()
+
+    # Start with target XYZ
+    target_x, target_y, target_z, target_pitch = 180.0, 50.0, 180.0, 0.0
+    ik_angles = solver.inverse_kinematics(target_x, target_y, target_z, target_pitch)
+    
+    # Run FK on solved angles
+    fk_result = solver.forward_kinematics(ik_angles)
+
+    # Output should match original target within rounding tolerance
+    assert abs(fk_result["x"] - target_x) < 1.0
+    assert abs(fk_result["y"] - target_y) < 1.0
+    assert abs(fk_result["z"] - target_z) < 1.0
+    assert abs(fk_result["pitch"] - target_pitch) < 1.0
+

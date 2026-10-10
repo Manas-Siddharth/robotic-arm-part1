@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, status, Body
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,9 +19,13 @@ from backend.safety import SafetyMonitor
 from backend.telemetry import TelemetryManager
 from backend.pose_manager import PoseManager
 from backend.kinematics import KinematicsController
+from backend.trajectory import (
+    TrajectoryPlanner, TrajectoryExecutor, Waypoint, InterpolationType
+)
 from backend.models import (
     SystemState, MoveRequest, XYZMoveRequest, TorqueRequest, PoseModel,
-    PoseSequenceRequest, APIResponse
+    SequenceModel, SequenceStep, PoseSequenceRequest, APIResponse,
+    WaypointModel, TrajectoryPreviewRequest, TrajectoryExecuteRequest
 )
 from backend.exceptions import (
     RoboticArmException, JointLimitExceededError, SafetyFaultError,
@@ -43,9 +47,12 @@ safety_monitor: Optional[SafetyMonitor] = None
 telemetry_manager: Optional[TelemetryManager] = None
 pose_manager: Optional[PoseManager] = None
 kinematics_controller: Optional[KinematicsController] = None
+trajectory_planner: Optional[TrajectoryPlanner] = None
+trajectory_executor: Optional[TrajectoryExecutor] = None
 
 def init_system(config: Optional[ArmConfig] = None):
     global arm_instance, safety_monitor, telemetry_manager, pose_manager, kinematics_controller, global_config
+    global trajectory_planner, trajectory_executor
     if config:
         global_config = config
     else:
@@ -69,6 +76,10 @@ def init_system(config: Optional[ArmConfig] = None):
         pose_manager = PoseManager()
     if kinematics_controller is None:
         kinematics_controller = KinematicsController(arm_instance, safety_monitor)
+    if trajectory_planner is None:
+        trajectory_planner = TrajectoryPlanner(global_config)
+    if trajectory_executor is None:
+        trajectory_executor = TrajectoryExecutor(arm_instance, safety_monitor, global_config)
 
 # Initialize immediately for direct API access and unit tests
 init_system()
@@ -84,6 +95,8 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down Robotic Arm Backend...")
+    if trajectory_executor:
+        trajectory_executor.cancel()
     if telemetry_manager:
         telemetry_manager.stop()
     if arm_instance:
@@ -106,6 +119,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Prevent stale browser caching of frontend static assets during development
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/js") or request.url.path.startswith("/css") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 # Exception Handlers
 @app.exception_handler(RoboticArmException)
@@ -166,6 +189,7 @@ async def move_joints(request: MoveRequest):
 
     safety_monitor.record_command()
     success = arm_instance.move_joints(request.angles, speed=request.speed)
+    safety_monitor.end_movement_if_settled()
     return APIResponse(
         success=success,
         message=f"Joint movement command sent successfully (speed={request.speed}).",
@@ -177,6 +201,16 @@ async def get_forward_kinematics():
     """Return present end-effector Cartesian XYZ position computed via FK."""
     pos = kinematics_controller.get_end_effector_position()
     return APIResponse(success=True, message="End-effector position calculated", data=pos)
+
+@app.post("/api/kinematics/validate", response_model=APIResponse)
+async def validate_kinematics(req: XYZMoveRequest):
+    """Validate target Cartesian coordinates and return calculated joint angles without moving."""
+    result = kinematics_controller.validate_ik(req.x, req.y, req.z, pitch=req.pitch or 0.0)
+    return APIResponse(
+        success=result["reachable"],
+        message=result["message"],
+        data=result
+    )
 
 @app.post("/api/move_xyz", response_model=APIResponse)
 async def move_xyz(req: XYZMoveRequest):
@@ -202,7 +236,6 @@ async def torque_on():
     """Enable torque on all servos."""
     if safety_monitor.fault_latched:
         raise SafetyFaultError(f"Cannot enable torque: System is in FAULT state ({safety_monitor.fault_reason}).")
-    safety_monitor.record_command()
     arm_instance.enable_torque(True)
     return APIResponse(success=True, message="Torque enabled for all joints.")
 
@@ -211,8 +244,6 @@ async def set_torque(req: TorqueRequest):
     """Enable/disable torque on specific joint or all joints."""
     if req.enable and safety_monitor.fault_latched:
         raise SafetyFaultError(f"Cannot enable torque: System is in FAULT state ({safety_monitor.fault_reason}).")
-    if req.enable:
-        safety_monitor.record_command()
     arm_instance.enable_torque(req.enable, req.joint_id)
     target = f"joint {req.joint_id}" if req.joint_id else "all joints"
     return APIResponse(success=True, message=f"Torque set to {req.enable} for {target}.")
@@ -228,6 +259,29 @@ async def clear_fault():
     """Attempt to clear safety fault latch."""
     safety_monitor.clear_fault()
     return APIResponse(success=True, message="Fault latch cleared successfully.")
+
+@app.post("/api/heartbeat", response_model=APIResponse)
+async def heartbeat():
+    """Receive explicit control session heartbeat."""
+    if safety_monitor.fault_latched:
+        raise SafetyFaultError(f"Cannot process heartbeat: System in FAULT state ({safety_monitor.fault_reason}).")
+    safety_monitor.record_heartbeat()
+    return APIResponse(success=True, message="Heartbeat acknowledged.")
+
+@app.post("/api/control_session/start", response_model=APIResponse)
+async def start_control_session():
+    """Explicitly start active control session requiring heartbeats."""
+    if safety_monitor.fault_latched:
+        raise SafetyFaultError(f"Cannot start control session: System in FAULT state.")
+    safety_monitor.start_control_session()
+    return APIResponse(success=True, message="Active control session started.")
+
+@app.post("/api/control_session/stop", response_model=APIResponse)
+async def stop_control_session():
+    """Stop active control session and return to IDLE."""
+    safety_monitor.stop_control_session()
+    return APIResponse(success=True, message="Active control session stopped.")
+
 
 
 # Teach / Pose API Endpoints
@@ -276,25 +330,181 @@ async def execute_pose(name: str):
 async def execute_sequence(req: PoseSequenceRequest):
     """Execute sequence of poses with delays asynchronously."""
     if safety_monitor.fault_latched:
-        raise SafetyFaultError(f"Cannot execute sequence: System in FAULT state.")
+        raise SafetyFaultError("Cannot execute sequence: System in FAULT state.")
 
     async def _run_sequence():
-        for name in req.pose_names:
+        steps = req.steps or []
+        if not steps and req.pose_names:
+            steps = [
+                {"pose_name": name, "delay_seconds": req.delay_seconds, "speed": req.speed}
+                for name in req.pose_names
+            ]
+
+        for step in steps:
             if safety_monitor.fault_latched:
                 logger.warning("Sequence aborted due to safety fault.")
                 break
             try:
-                pose = pose_manager.get_pose(name)
-                speed = req.speed or pose.speed
+                pose_name = step.pose_name if hasattr(step, "pose_name") else step.get("pose_name")
+                delay = step.delay_seconds if hasattr(step, "delay_seconds") else step.get("delay_seconds", 1.0)
+                step_speed = step.speed if hasattr(step, "speed") else step.get("speed")
+
+                pose = pose_manager.get_pose(pose_name)
+                speed = step_speed or req.speed or pose.speed
                 safety_monitor.record_command()
                 arm_instance.move_joints(pose.angles, speed=speed)
-                await asyncio.sleep(req.delay_seconds)
+                safety_monitor.end_movement_if_settled()
+                await asyncio.sleep(delay)
             except Exception as e:
-                logger.error(f"Error executing sequence step '{name}': {e}")
+                logger.error(f"Error executing sequence step: {e}")
                 break
 
     asyncio.create_task(_run_sequence())
-    return APIResponse(success=True, message=f"Started executing sequence of {len(req.pose_names)} poses.")
+    num_steps = len(req.steps) if req.steps else len(req.pose_names or [])
+    return APIResponse(success=True, message=f"Started executing sequence of {num_steps} poses.")
+
+# Motion Sequence Storage Endpoints
+@app.get("/api/sequences", response_model=APIResponse)
+async def list_sequences():
+    """List all saved sequences."""
+    seqs = pose_manager.list_sequences()
+    return APIResponse(success=True, message="Sequences retrieved", data=[s.model_dump() for s in seqs])
+
+@app.post("/api/sequences", response_model=APIResponse)
+async def save_sequence(seq: SequenceModel = Body(...)):
+    """Save custom motion sequence."""
+    saved = pose_manager.save_sequence(seq.name, seq.steps)
+    return APIResponse(success=True, message=f"Sequence '{seq.name}' saved.", data=saved.model_dump())
+
+
+@app.get("/api/sequences/{name}", response_model=APIResponse)
+async def get_sequence(name: str):
+    """Get single sequence by name."""
+    seq = pose_manager.get_sequence(name)
+    return APIResponse(success=True, message="Sequence loaded", data=seq.model_dump())
+
+@app.delete("/api/sequences/{name}", response_model=APIResponse)
+async def delete_sequence(name: str):
+    """Delete a saved sequence."""
+    pose_manager.delete_sequence(name)
+    return APIResponse(success=True, message=f"Sequence '{name}' deleted.")
+
+@app.post("/api/sequences/{name}/execute", response_model=APIResponse)
+async def execute_saved_sequence(name: str):
+    """Execute a saved sequence by name."""
+    seq = pose_manager.get_sequence(name)
+    req = PoseSequenceRequest(steps=seq.steps)
+    return await execute_sequence(req)
+
+
+
+# Trajectory Planning API Endpoints (Phase 1)
+@app.post("/api/trajectory/validate", response_model=APIResponse)
+async def validate_trajectory(req: TrajectoryPreviewRequest):
+    """Validate multi-waypoint trajectory feasibility before execution."""
+    try:
+        interp = InterpolationType(req.interpolation.lower())
+    except ValueError:
+        raise InvalidCommandError(f"Unsupported interpolation type: {req.interpolation}. Choose linear, cubic, quintic, or cubic_spline.")
+
+    wps = [Waypoint(angles=w.angles, duration=w.duration, name=w.name) for w in req.waypoints]
+    is_valid, errors, warnings = trajectory_planner.validate_waypoints(
+        wps,
+        velocity_limits=req.velocity_limits,
+        acceleration_limits=req.acceleration_limits,
+        interpolation=interp
+    )
+
+    return APIResponse(
+        success=is_valid,
+        message="Trajectory is feasible." if is_valid else f"Validation failed ({len(errors)} error(s)).",
+        data={
+            "valid": is_valid,
+            "is_valid": is_valid,
+            "errors": errors,
+            "warnings": warnings,
+            "total_duration": sum(w.duration for w in wps[1:]) if len(wps) > 1 else 0.0
+        }
+    )
+
+@app.post("/api/trajectory/preview", response_model=APIResponse)
+async def preview_trajectory(req: TrajectoryPreviewRequest):
+    """Compute and sample trajectory for 3D visualization and charts without moving the arm."""
+    try:
+        interp = InterpolationType(req.interpolation.lower())
+    except ValueError:
+        raise InvalidCommandError(f"Unsupported interpolation type: {req.interpolation}. Choose linear, cubic, quintic, or cubic_spline.")
+
+    wps = [Waypoint(angles=w.angles, duration=w.duration, name=w.name) for w in req.waypoints]
+    plan = trajectory_planner.plan(
+        wps,
+        interpolation=interp,
+        sample_rate=req.sample_rate or 20.0,
+        velocity_limits=req.velocity_limits,
+        acceleration_limits=req.acceleration_limits
+    )
+
+    return APIResponse(
+        success=plan.is_valid,
+        message="Trajectory preview generated." if plan.is_valid else f"Preview error: {'; '.join(plan.validation_errors)}",
+        data=plan.to_dict()
+    )
+
+@app.post("/api/trajectory/execute", response_model=APIResponse)
+async def execute_trajectory(req: TrajectoryExecuteRequest):
+    """Validate and start executing planned trajectory on the simulated arm."""
+    if safety_monitor.fault_latched:
+        raise SafetyFaultError(f"Cannot execute trajectory: System in FAULT state ({safety_monitor.fault_reason}).")
+
+    try:
+        interp = InterpolationType(req.interpolation.lower())
+    except ValueError:
+        raise InvalidCommandError(f"Unsupported interpolation type: {req.interpolation}. Choose linear, cubic, quintic, or cubic_spline.")
+
+    wps = [Waypoint(angles=w.angles, duration=w.duration, name=w.name) for w in req.waypoints]
+    plan = trajectory_planner.plan(
+        wps,
+        interpolation=interp,
+        sample_rate=req.sample_rate or 20.0,
+        velocity_limits=req.velocity_limits,
+        acceleration_limits=req.acceleration_limits
+    )
+
+    if not plan.is_valid:
+        raise InvalidCommandError(f"Cannot execute invalid trajectory: {'; '.join(plan.validation_errors)}")
+
+    # Stop any prior trajectory in progress before launching new one
+    if trajectory_executor.state == "RUNNING":
+        trajectory_executor.cancel()
+        await asyncio.sleep(0.05)
+
+    asyncio.create_task(trajectory_executor.execute(plan))
+
+    return APIResponse(
+        success=True,
+        message=f"Trajectory execution started ({plan.total_duration:.1f}s, {len(plan.waypoints)} waypoints).",
+        data=trajectory_executor.get_status()
+    )
+
+@app.post("/api/trajectory/cancel", response_model=APIResponse)
+async def cancel_trajectory():
+    """Cancel currently executing trajectory immediately."""
+    cancelled = trajectory_executor.cancel()
+    return APIResponse(
+        success=True,
+        message="Trajectory execution cancelled." if cancelled else "No trajectory was actively running.",
+        data=trajectory_executor.get_status()
+    )
+
+@app.get("/api/trajectory/status", response_model=APIResponse)
+async def get_trajectory_status():
+    """Get current trajectory execution state and progress."""
+    return APIResponse(
+        success=True,
+        message="Trajectory status retrieved.",
+        data=trajectory_executor.get_status()
+    )
+
 
 
 # WebSocket Endpoint
@@ -312,8 +522,12 @@ async def websocket_telemetry(websocket: WebSocket):
             if data_text:
                 try:
                     payload = json.loads(data_text)
-                    if payload.get("action") == "ping":
+                    act = payload.get("action")
+                    if act == "ping":
                         await websocket.send_text(json.dumps({"event": "pong"}))
+                    elif act == "heartbeat":
+                        safety_monitor.record_heartbeat()
+                        await websocket.send_text(json.dumps({"event": "heartbeat_ack"}))
                 except Exception:
                     pass
     except (WebSocketDisconnect, RuntimeError):

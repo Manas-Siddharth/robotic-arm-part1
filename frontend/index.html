@@ -3,23 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>5-DOF Dynamixel AX-12A Robotic Arm Control Panel</title>
+  <title>5-DOF Dynamixel AX-12A Robotics Control Workstation</title>
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- Icons -->
+  <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-  <!-- Stylesheet -->
+  <!-- 3D & Charting CDN Libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Main Stylesheet -->
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="dark-theme">
 
   <div class="app-container">
-    <!-- TOP HEADER NAVBAR -->
+    <!-- PERSISTENT TOP NAVIGATION HEADER & EMERGENCY CONTROL -->
     <header class="navbar glass-header">
       <div class="brand">
         <div class="brand-icon">
@@ -27,19 +32,25 @@
         </div>
         <div class="brand-title">
           <h1>DYNAMIXEL ARM</h1>
-          <span class="sub-title">5-DOF AX-12A CONTROL SYSTEM</span>
+          <span class="sub-title">5-DOF AX-12A CONTROL WORKSTATION</span>
         </div>
       </div>
 
-      <!-- STATUS BADGES -->
+      <!-- SYSTEM STATUS BADGES -->
       <div class="status-bar">
+        <div class="status-badge" id="badge-backend">
+          <span class="status-dot offline" id="dot-backend"></span>
+          <span class="badge-label">BACKEND:</span>
+          <span class="badge-value" id="val-backend">CHECKING</span>
+        </div>
+
         <div class="status-badge" id="badge-connection">
           <span class="status-dot offline" id="dot-connection"></span>
-          <span class="badge-label">CONNECTION:</span>
+          <span class="badge-label">WS TELEMETRY:</span>
           <span class="badge-value" id="val-connection">CONNECTING...</span>
         </div>
 
-        <div class="status-badge" id="badge-mode">
+        <div class="status-badge mode-sim" id="badge-mode">
           <i class="fa-solid fa-microchip"></i>
           <span class="badge-label">MODE:</span>
           <span class="badge-value" id="val-mode">SIMULATION</span>
@@ -57,96 +68,295 @@
           <span class="badge-value" id="val-torque">OFF</span>
         </div>
       </div>
+
+      <!-- PERSISTENT HEADER E-STOP & SAFETY ACTIONS -->
+      <div class="header-safety-actions">
+        <button class="btn btn-warning btn-sm" id="btn-header-clear-fault" onclick="ArmControl.clearFault()">
+          <i class="fa-solid fa-rotate-left"></i> CLEAR FAULT
+        </button>
+        <button class="btn btn-header-estop" id="btn-header-estop" onclick="ArmControl.triggerEstop()">
+          <i class="fa-solid fa-triangle-exclamation"></i> E-STOP
+        </button>
+      </div>
     </header>
 
-    <!-- MAIN DASHBOARD CONTENT -->
-    <main class="dashboard-grid">
+    <!-- NAVIGATION TABS BAR -->
+    <nav class="nav-tabs-bar glass-card">
+      <button class="nav-tab active" data-tab="tab-overview" onclick="ArmControl.switchTab('tab-overview')">
+        <i class="fa-solid fa-cube"></i> 3D Arm Overview
+      </button>
+      <button class="nav-tab" data-tab="tab-joint-control" onclick="ArmControl.switchTab('tab-joint-control')">
+        <i class="fa-solid fa-sliders"></i> Manual Joint Control
+      </button>
+      <button class="nav-tab" data-tab="tab-cartesian" onclick="ArmControl.switchTab('tab-cartesian')">
+        <i class="fa-solid fa-crosshairs"></i> Cartesian Workspace
+      </button>
+      <button class="nav-tab" data-tab="tab-sequences" onclick="ArmControl.switchTab('tab-sequences')">
+        <i class="fa-solid fa-film"></i> Motion Sequences & Poses
+      </button>
+      <button class="nav-tab" data-tab="tab-trajectory" onclick="ArmControl.switchTab('tab-trajectory')">
+        <i class="fa-solid fa-bezier-curve"></i> Trajectory Planning
+      </button>
+      <button class="nav-tab" data-tab="tab-telemetry" onclick="ArmControl.switchTab('tab-telemetry')">
+        <i class="fa-solid fa-chart-line"></i> Telemetry & Diagnostics
+      </button>
+    </nav>
 
-      <!-- LEFT COLUMN: JOINT CONTROL & SPEED -->
-      <section class="card glass-card joint-control-card">
-        <div class="card-header">
-          <h2><i class="fa-solid fa-sliders"></i> Joint Control</h2>
-          <div class="preset-actions">
-            <button class="btn btn-sm btn-outline" onclick="ArmControl.presetHome()">
-              <i class="fa-solid fa-house"></i> Home (150°)
-            </button>
-            <button class="btn btn-sm btn-outline" onclick="ArmControl.presetSleep()">
-              <i class="fa-solid fa-bed"></i> Sleep
-            </button>
+    <!-- TAB 1: 3D ARM OVERVIEW -->
+    <section id="tab-overview" class="tab-page active">
+      <div class="overview-grid">
+        <!-- 3D VIEW HERO CONTAINER -->
+        <div class="card glass-card viewer-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-cube"></i> Interactive 3D Kinematic Model</h2>
+            <div class="viewer-controls">
+              <button class="btn btn-xs btn-outline" onclick="ArmControl.arm3D.resetCamera()">
+                <i class="fa-solid fa-arrows-to-eye"></i> Reset View
+              </button>
+
+              <button class="btn btn-xs btn-outline" onclick="ArmControl.arm3D.setCameraView('top')">Top</button>
+              <button class="btn btn-xs btn-outline" onclick="ArmControl.arm3D.setCameraView('front')">Front</button>
+              <button class="btn btn-xs btn-outline" onclick="ArmControl.arm3D.setCameraView('side')">Side</button>
+              
+              <button class="btn btn-xs btn-outline" id="btn-toggle-ghost" onclick="ArmControl.toggleTargetGhost()">
+                <i class="fa-solid fa-ghost"></i> Target Ghost
+              </button>
+            </div>
+          </div>
+
+          <div class="card-body viewer-body">
+            <div id="arm-3d-canvas-container" class="canvas-3d-wrapper"></div>
+
+            <!-- OVERLAY READOUT & LEGEND BADGES ON 3D CANVAS -->
+            <div class="canvas-overlay-readout">
+              <div class="readout-box">
+                <span class="readout-label">End-Effector Position (FK):</span>
+                <span class="readout-value" id="overlay-xyz">X: 300.0, Y: 0.0, Z: 145.0 mm | Pitch: 0.0°</span>
+              </div>
+              <div class="readout-box legend-box">
+                <span class="readout-label">Visual Model Legend:</span>
+                <div class="legend-items">
+                  <span class="legend-tag solid-arm"><span class="dot-color dot-silver"></span> Present Pose (Physical Arm)</span>
+                  <span class="legend-tag ghost-arm"><span class="dot-color dot-cyan"></span> Target Goal Ghost</span>
+                  <span class="legend-tag geom-tag"><i class="fa-solid fa-ruler"></i> Provisional Dimensions (L1:145, L2:105, L3:105, L4:90 mm)</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="card-body">
-          <div class="joint-sliders-container" id="joint-sliders">
-            <!-- Dynamically populated J1-J5 sliders -->
+        <!-- OVERVIEW SIDE DASHBOARD -->
+        <div class="card-column">
+          <!-- QUICK PRESETS CARD -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2><i class="fa-solid fa-bolt"></i> Quick Pose Presets</h2>
+            </div>
+            <div class="card-body presets-grid">
+              <button class="btn btn-outline" onclick="ArmControl.presetHome()">
+                <i class="fa-solid fa-house"></i> Home (150°)
+              </button>
+              <button class="btn btn-outline" onclick="ArmControl.presetSleep()">
+                <i class="fa-solid fa-bed"></i> Sleep Position
+              </button>
+              <button class="btn btn-outline" onclick="ArmControl.presetReach()">
+                <i class="fa-solid fa-hand-point-forward"></i> Reach Forward
+              </button>
+              <button class="btn btn-outline" onclick="ArmControl.presetVertical()">
+                <i class="fa-solid fa-arrow-up-long"></i> Vertical Up
+              </button>
+            </div>
           </div>
 
-          <div class="divider"></div>
-
-          <!-- SPEED CONTROL -->
-          <div class="speed-control-group">
-            <div class="speed-header">
-              <label for="speed-slider"><i class="fa-solid fa-gauge-high"></i> Movement Speed:</label>
-              <span class="speed-value" id="speed-val-display">100 (Raw)</span>
+          <!-- LIVE JOINT ANGLE READOUTS -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2><i class="fa-solid fa-gauge"></i> Joint Summary</h2>
             </div>
-            <div class="speed-input-wrapper">
-              <input type="range" id="speed-slider" min="1" max="1023" value="100" oninput="ArmControl.updateSpeedLabel(this.value)">
-              <div class="speed-presets">
-                <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(50)">Slow (50)</button>
-                <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(200)">Med (200)</button>
-                <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(500)">Fast (500)</button>
+            <div class="card-body">
+              <div class="joint-summary-list" id="joint-summary-container">
+                <!-- Dynamically populated joint quick rows -->
               </div>
             </div>
           </div>
 
-          <!-- ACTION BUTTON -->
-          <div class="joint-action-buttons">
-            <button class="btn btn-primary btn-block btn-lg" id="btn-apply-move" onclick="ArmControl.applyMove()">
-              <i class="fa-solid fa-paper-plane"></i> MOVE JOINTS SYNCHRONIZED
-            </button>
-          </div>
-        </div>
-      </section>
-
-
-      <!-- MIDDLE COLUMN: SAFETY & CONTROL ACTIONS -->
-      <section class="card-column">
-        <!-- EMERGENCY & TORQUE CARD -->
-        <div class="card glass-card safety-card">
-          <div class="card-header">
-            <h2><i class="fa-solid fa-shield-halved"></i> Safety & Emergency Control</h2>
-          </div>
-          <div class="card-body estop-section">
-            <!-- LARGE E-STOP BUTTON -->
-            <button class="btn-estop" id="btn-estop" onclick="ArmControl.triggerEstop()">
-              <div class="estop-content">
-                <i class="fa-solid fa-triangle-exclamation estop-icon"></i>
-                <span class="estop-text">EMERGENCY STOP</span>
+          <!-- SAFETY & SYSTEM DIAGNOSTIC SNAPSHOT -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2><i class="fa-solid fa-heart-pulse"></i> Health Snapshot</h2>
+            </div>
+            <div class="card-body health-snapshot">
+              <div class="snap-item">
+                <span class="snap-label">Watchdog Status:</span>
+                <span class="snap-value" id="overview-watchdog">IDLE</span>
               </div>
-            </button>
-
-            <div class="safety-buttons-row">
-              <button class="btn btn-warning" id="btn-clear-fault" onclick="ArmControl.clearFault()">
-                <i class="fa-solid fa-rotate-left"></i> CLEAR FAULT
-              </button>
-              <button class="btn btn-success" id="btn-torque-on" onclick="ArmControl.setTorque(true)">
-                <i class="fa-solid fa-bolt"></i> TORQUE ON
-              </button>
-              <button class="btn btn-secondary" id="btn-torque-off" onclick="ArmControl.setTorque(false)">
-                <i class="fa-solid fa-power-off"></i> TORQUE OFF
-              </button>
+              <div class="snap-item">
+                <span class="snap-label">Last Command:</span>
+                <span class="snap-value" id="overview-last-cmd">None</span>
+              </div>
+              <div class="snap-item">
+                <span class="snap-label">Fault Latch:</span>
+                <span class="snap-value" id="overview-fault-reason">None</span>
+              </div>
             </div>
           </div>
         </div>
+      </div>
+    </section>
 
-        <!-- TEACH / POSE MANAGEMENT CARD -->
-        <div class="card glass-card pose-card">
+    <!-- TAB 2: MANUAL JOINT CONTROL -->
+    <section id="tab-joint-control" class="tab-page">
+      <div class="dashboard-grid">
+        <section class="card glass-card wide-card">
           <div class="card-header">
-            <h2><i class="fa-solid fa-bookmark"></i> Teach & Pose System</h2>
+            <h2><i class="fa-solid fa-sliders"></i> Servo Joint Control (J1–J5)</h2>
+            <div class="preset-actions">
+              <button class="btn btn-sm btn-outline" onclick="ArmControl.presetHome()">
+                <i class="fa-solid fa-house"></i> Home All (150°)
+              </button>
+            </div>
+          </div>
+
+          <div class="card-body">
+            <div class="joint-sliders-container" id="joint-sliders">
+              <!-- Dynamically populated joint controls -->
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- SPEED CONTROL & GLOBAL ACTIONS -->
+            <div class="control-actions-footer">
+              <div class="speed-control-group">
+                <div class="speed-header">
+                  <label for="speed-slider"><i class="fa-solid fa-gauge-high"></i> Movement Speed:</label>
+                  <span class="speed-value" id="speed-val-display">100 (Raw)</span>
+                </div>
+                <div class="speed-input-wrapper">
+                  <input type="range" id="speed-slider" min="1" max="1023" value="100" oninput="ArmControl.updateSpeedLabel(this.value)">
+                  <div class="speed-presets">
+                    <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(50)">Slow (50)</button>
+                    <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(200)">Med (200)</button>
+                    <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(500)">Fast (500)</button>
+                    <button class="btn btn-xs" onclick="ArmControl.setSpeedPreset(1023)">Max (1023)</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="joint-action-buttons">
+                <button class="btn btn-primary btn-lg" id="btn-apply-move" onclick="ArmControl.applyMove()">
+                  <i class="fa-solid fa-paper-plane"></i> MOVE JOINTS SYNCHRONIZED
+                </button>
+                <button class="btn btn-secondary btn-lg" onclick="ArmControl.setTorque(true)">
+                  <i class="fa-solid fa-bolt"></i> TORQUE ON
+                </button>
+                <button class="btn btn-secondary btn-lg" onclick="ArmControl.setTorque(false)">
+                  <i class="fa-solid fa-power-off"></i> TORQUE OFF
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- TAB 3: CARTESIAN CONTROL -->
+    <section id="tab-cartesian" class="tab-page">
+      <div class="dashboard-grid">
+        <div class="card glass-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-crosshairs"></i> Inverse Kinematics Workspace</h2>
+          </div>
+          <div class="card-body cartesian-form">
+            <div class="form-group-row">
+              <div class="form-field">
+                <label for="cart-x">Target X (mm):</label>
+                <input type="number" id="cart-x" class="form-input" value="150.0" step="5" oninput="ArmControl.validateCartesianTarget()">
+              </div>
+              <div class="form-field">
+                <label for="cart-y">Target Y (mm):</label>
+                <input type="number" id="cart-y" class="form-input" value="0.0" step="5" oninput="ArmControl.validateCartesianTarget()">
+              </div>
+            </div>
+
+            <div class="form-group-row">
+              <div class="form-field">
+                <label for="cart-z">Target Z (mm):</label>
+                <input type="number" id="cart-z" class="form-input" value="145.0" step="5" oninput="ArmControl.validateCartesianTarget()">
+              </div>
+              <div class="form-field">
+                <label for="cart-pitch">Wrist Pitch (°):</label>
+                <input type="number" id="cart-pitch" class="form-input" value="0.0" step="5" min="-90" max="90" oninput="ArmControl.validateCartesianTarget()">
+              </div>
+            </div>
+
+            <div class="cartesian-presets-row">
+              <button class="btn btn-xs btn-outline" onclick="ArmControl.setCartesianTarget(150, 0, 145, 0)">Center Home</button>
+              <button class="btn btn-xs btn-outline" onclick="ArmControl.setCartesianTarget(200, 50, 100, -15)">Reach Forward Right</button>
+              <button class="btn btn-xs btn-outline" onclick="ArmControl.setCartesianTarget(180, -80, 120, 0)">Reach Left</button>
+              <button class="btn btn-xs btn-outline" onclick="ArmControl.setCartesianTarget(0, 0, 445, 90)">Vertical High</button>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="ik-validation-card" id="ik-validation-card">
+              <div class="ik-status-header">
+                <span class="ik-status-badge reachable" id="ik-status-badge"><i class="fa-solid fa-check"></i> TARGET REACHABLE</span>
+              </div>
+              <div class="ik-angles-preview" id="ik-angles-preview">
+                Target Joint Angles: J1: 150.0°, J2: 150.0°, J3: 150.0°, J4: 150.0°, J5: 150.0°
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-block btn-lg" id="btn-move-cartesian" onclick="ArmControl.executeCartesianMove()">
+              <i class="fa-solid fa-location-arrow"></i> EXECUTE CARTESIAN MOVEMENT
+            </button>
+          </div>
+        </div>
+
+        <div class="card glass-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-compass"></i> End-Effector Live Position (FK)</h2>
+          </div>
+          <div class="card-body fk-display">
+            <div class="fk-coordinate-box">
+              <div class="fk-val-item">
+                <span class="fk-axis">X Axis</span>
+                <span class="fk-val" id="fk-val-x">0.0 mm</span>
+              </div>
+              <div class="fk-val-item">
+                <span class="fk-axis">Y Axis</span>
+                <span class="fk-val" id="fk-val-y">0.0 mm</span>
+              </div>
+              <div class="fk-val-item">
+                <span class="fk-axis">Z Axis</span>
+                <span class="fk-val" id="fk-val-z">0.0 mm</span>
+              </div>
+              <div class="fk-val-item">
+                <span class="fk-axis">Pitch</span>
+                <span class="fk-val" id="fk-val-pitch">0.0°</span>
+              </div>
+            </div>
+
+            <div class="fk-info-note">
+              <i class="fa-solid fa-info-circle"></i>
+              Calculated using standard 5-DOF link geometry (L1=145mm, L2=105mm, L3=105mm, L4=90mm).
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: MOTION SEQUENCES & POSES -->
+    <section id="tab-sequences" class="tab-page">
+      <div class="dashboard-grid">
+        <!-- POSE LIBRARY -->
+        <div class="card glass-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-bookmark"></i> Pose Library</h2>
           </div>
           <div class="card-body">
             <div class="pose-input-group">
-              <input type="text" id="pose-name-input" placeholder="Pose Name (e.g., PickPose)" class="form-input">
+              <input type="text" id="pose-name-input" placeholder="New Pose Name" class="form-input">
               <button class="btn btn-primary" onclick="ArmControl.saveCurrentPose()">
                 <i class="fa-solid fa-floppy-disk"></i> Save Current
               </button>
@@ -162,70 +372,314 @@
             </div>
           </div>
         </div>
-      </section>
 
-      <!-- RIGHT COLUMN / BOTTOM: LIVE TELEMETRY TABLE -->
-      <section class="card glass-card telemetry-card wide-card">
-        <div class="card-header">
-          <h2><i class="fa-solid fa-chart-line"></i> Live Telemetry & Servo Metrics</h2>
-          <div class="telemetry-hz">
-            <span>Rate: <strong id="telemetry-rate">10 Hz</strong></span>
+        <!-- SEQUENCE BUILDER -->
+        <div class="card glass-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-film"></i> Sequence Builder & Replay</h2>
           </div>
-        </div>
+          <div class="card-body sequence-builder-body">
+            <div class="sequence-input-group">
+              <input type="text" id="sequence-name-input" placeholder="Sequence Name (e.g. PickAndPlace)" class="form-input">
+              <button class="btn btn-secondary" onclick="ArmControl.saveSequence()">
+                <i class="fa-solid fa-save"></i> Save Sequence
+              </button>
+            </div>
 
-        <div class="card-body">
-          <div class="table-responsive">
-            <table class="telemetry-table">
-              <thead>
-                <tr>
-                  <th>Joint</th>
-                  <th>Present Angle</th>
-                  <th>Goal Angle</th>
-                  <th>Speed</th>
-                  <th>Load</th>
-                  <th>Voltage</th>
-                  <th>Temp</th>
-                  <th>Torque</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="telemetry-table-body">
-                <!-- Dynamically populated servo telemetry rows -->
-              </tbody>
-            </table>
-          </div>
+            <div class="sequence-controls-bar">
+              <span class="seq-label">Sequence Steps:</span>
+              <button class="btn btn-xs btn-primary" onclick="ArmControl.addStepToSequence()">
+                <i class="fa-solid fa-plus"></i> Add Selected Pose
+              </button>
+              <select id="seq-pose-selector" class="form-input form-select-sm">
+                <!-- Populated dynamically -->
+              </select>
+            </div>
 
-          <!-- DIAGNOSTIC BAR -->
-          <div class="diagnostic-bar">
-            <div class="diag-item">
-              <span class="diag-label">Watchdog:</span>
-              <span class="diag-val" id="diag-watchdog">ACTIVE (5.0s)</span>
+            <div class="sequence-steps-list" id="sequence-steps-container">
+              <p class="empty-list-msg">No steps added to sequence yet.</p>
             </div>
-            <div class="diag-item">
-              <span class="diag-label">Max Temp Limit:</span>
-              <span class="diag-val">70.0 °C</span>
-            </div>
-            <div class="diag-item">
-              <span class="diag-label">Last Command:</span>
-              <span class="diag-val" id="diag-last-cmd">None</span>
-            </div>
-            <div class="diag-item">
-              <span class="diag-label">Fault Log:</span>
-              <span class="diag-val fault-text" id="diag-fault-reason">None</span>
+
+            <div class="sequence-execution-bar">
+              <button class="btn btn-success btn-lg" onclick="ArmControl.playCurrentSequence()">
+                <i class="fa-solid fa-play"></i> EXECUTE SEQUENCE
+              </button>
             </div>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-    </main>
+    <!-- TAB 5: TRAJECTORY PLANNING (PHASE 1) -->
+    <section id="tab-trajectory" class="tab-page">
+      <div class="dashboard-grid">
+        <!-- LEFT: WAYPOINTS & CONFIGURATION -->
+        <div class="card glass-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-bezier-curve"></i> Multi-Waypoint Trajectory Definition</h2>
+            <div class="header-actions">
+              <select id="traj-preset-select" class="form-input form-select-sm" onchange="ArmControl.loadTrajectoryPreset(this.value)">
+                <option value="">-- Load Preset --</option>
+                <option value="pick_place">Pick & Place 4-Point</option>
+                <option value="scan_sweep">Workspace Scan Sweep</option>
+                <option value="wave">Gentle Wave (5-Point)</option>
+              </select>
+            </div>
+          </div>
+          <div class="card-body trajectory-config-body">
+            <!-- PARAMETERS BAR -->
+            <div class="trajectory-params-bar">
+              <div class="form-field">
+                <label for="traj-interp-select">Interpolation Profile:</label>
+                <select id="traj-interp-select" class="form-input" onchange="ArmControl.onTrajectoryParamChange()">
+                  <option value="quintic">Quintic Polynomial (s(u)=10u³-15u⁴+6u⁵ - Zero Accel/Vel)</option>
+                  <option value="cubic">Cubic Polynomial (Rest-to-Rest)</option>
+                  <option value="cubic_spline">Cubic Spline (Continuous Velocity)</option>
+                  <option value="linear">Linear (Constant Velocity)</option>
+                </select>
+              </div>
+
+              <div class="form-field">
+                <label for="traj-sample-rate">Sample Rate (Hz):</label>
+                <input type="number" id="traj-sample-rate" class="form-input" min="5" max="100" value="20" onchange="ArmControl.onTrajectoryParamChange()">
+              </div>
+            </div>
+
+            <!-- TABLE ACTIONS -->
+            <div class="trajectory-table-actions">
+              <span class="section-subtitle">Waypoints Table:</span>
+              <div class="btn-group">
+                <button class="btn btn-xs btn-outline" onclick="ArmControl.addCurrentPoseAsWaypoint()">
+                  <i class="fa-solid fa-crosshairs"></i> Add Current Pose
+                </button>
+                <button class="btn btn-xs btn-outline" onclick="ArmControl.addBlankWaypoint()">
+                  <i class="fa-solid fa-plus"></i> Add Blank Waypoint
+                </button>
+                <button class="btn btn-xs btn-outline" onclick="ArmControl.clearWaypoints()">
+                  <i class="fa-solid fa-trash-can"></i> Clear Table
+                </button>
+              </div>
+            </div>
+
+            <!-- WAYPOINT TABLE -->
+            <div class="table-responsive trajectory-table-wrapper">
+              <table class="telemetry-table trajectory-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Name</th>
+                    <th>J1 (Base)</th>
+                    <th>J2 (Shld)</th>
+                    <th>J3 (Elb)</th>
+                    <th>J4 (WrP)</th>
+                    <th>J5 (WrR)</th>
+                    <th>Duration (s)</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="trajectory-table-body">
+                  <!-- Dynamically rendered editable waypoints -->
+                </tbody>
+              </table>
+            </div>
+
+            <!-- VALIDATION & FEASIBILITY FEEDBACK BANNER -->
+            <div id="traj-validation-banner" class="validation-banner neutral">
+              <div class="val-header">
+                <i class="fa-solid fa-circle-info" id="traj-val-icon"></i>
+                <strong id="traj-val-title">Validation Status: Pending Preview</strong>
+              </div>
+              <div class="val-details" id="traj-val-details">
+                Configure at least 2 waypoints and click "Preview Trajectory" to validate joint limits, timing, and peak velocities.
+              </div>
+            </div>
+
+            <!-- CONTROLS & EXECUTION ROW -->
+            <div class="trajectory-controls-row">
+              <button class="btn btn-primary btn-lg" id="btn-preview-traj" onclick="ArmControl.previewTrajectory()">
+                <i class="fa-solid fa-chart-line"></i> PREVIEW TRAJECTORY
+              </button>
+              <button class="btn btn-success btn-lg" id="btn-execute-traj" onclick="ArmControl.executeTrajectory()">
+                <i class="fa-solid fa-play"></i> EXECUTE TRAJECTORY
+              </button>
+              <button class="btn btn-danger btn-lg" id="btn-cancel-traj" onclick="ArmControl.cancelTrajectory()">
+                <i class="fa-solid fa-stop"></i> CANCEL EXECUTION
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: PREVIEW CHARTS, METRICS & STATUS -->
+        <div class="card-column">
+          <!-- CHART CARD -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2><i class="fa-solid fa-chart-area"></i> Trajectory Joint Profiles vs Time</h2>
+              <span class="badge-neutral" id="traj-chart-badge">PREVIEW</span>
+            </div>
+            <div class="card-body">
+              <div class="chart-canvas-container trajectory-chart-container">
+                <canvas id="trajectoryPreviewChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUMMARY & REALTIME EXECUTION PROGRESS -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2><i class="fa-solid fa-gauge-high"></i> Kinematic Metrics & Execution Progress</h2>
+              <span class="status-badge ready" id="traj-exec-badge">IDLE</span>
+            </div>
+            <div class="card-body">
+              <div class="traj-progress-section">
+                <div class="progress-labels">
+                  <span>Progress: <strong id="traj-progress-pct">0.0%</strong></span>
+                  <span>Time: <span id="traj-elapsed-time">0.00s</span> / <span id="traj-total-time">0.00s</span></span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" id="traj-progress-bar" style="width: 0%;"></div>
+                </div>
+              </div>
+
+              <div class="metric-grid-compact">
+                <div class="metric-tile">
+                  <span class="tile-label">Est. Duration</span>
+                  <span class="tile-value" id="traj-metric-duration">0.0s</span>
+                </div>
+                <div class="metric-tile">
+                  <span class="tile-label">Total Waypoints</span>
+                  <span class="tile-value" id="traj-metric-waypoints">0</span>
+                </div>
+                <div class="metric-tile">
+                  <span class="tile-label">Max Planned Vel</span>
+                  <span class="tile-value" id="traj-metric-max-vel">0.0°/s</span>
+                </div>
+                <div class="metric-tile">
+                  <span class="tile-label">Active Waypoint</span>
+                  <span class="tile-value" id="traj-metric-active-wp">-</span>
+                </div>
+              </div>
+
+              <!-- PEAK VELOCITIES PER JOINT TABLE -->
+              <div class="peak-vel-list" id="traj-peak-vel-list">
+                <span class="section-subtitle">Peak Joint Velocities:</span>
+                <div class="peak-vel-chips">
+                  <span class="chip">J1: <strong id="pv-1">0°/s</strong></span>
+                  <span class="chip">J2: <strong id="pv-2">0°/s</strong></span>
+                  <span class="chip">J3: <strong id="pv-3">0°/s</strong></span>
+                  <span class="chip">J4: <strong id="pv-4">0°/s</strong></span>
+                  <span class="chip">J5: <strong id="pv-5">0°/s</strong></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 6: TELEMETRY & DIAGNOSTICS -->
+    <section id="tab-telemetry" class="tab-page">
+      <div class="card-column">
+        <!-- CHARTS CARD -->
+        <div class="card glass-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-chart-line"></i> Live Telemetry Charts over Time</h2>
+            <div class="chart-controls">
+              <select id="chart-metric-select" class="form-input form-select-sm" onchange="ArmControl.onChartMetricChange(this.value)">
+                <option value="position">Joint Present Angles (°)</option>
+                <option value="load">Motor Load (%)</option>
+                <option value="temperature">Temperature (°C)</option>
+                <option value="voltage">Voltage (V)</option>
+              </select>
+              <button class="btn btn-xs btn-outline" id="btn-pause-chart" onclick="ArmControl.toggleChartPause()">
+                <i class="fa-solid fa-pause"></i> Pause Chart
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-canvas-container">
+              <canvas id="telemetryChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- LIVE SERVO TABLE -->
+        <div class="card glass-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-microchip"></i> Live Servo Status Matrix</h2>
+            <span class="simulated-label-badge"><i class="fa-solid fa-flask"></i> SIMULATED METRICS</span>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="telemetry-table">
+                <thead>
+                  <tr>
+                    <th>Joint</th>
+                    <th>Present Angle</th>
+                    <th>Goal Angle</th>
+                    <th>Speed</th>
+                    <th>Load</th>
+                    <th>Voltage</th>
+                    <th>Temp</th>
+                    <th>Torque</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="telemetry-table-body">
+                  <!-- Dynamically populated servo telemetry rows -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- DIAGNOSTICS & SYSTEM EVENT LOG -->
+        <div class="card glass-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-list-check"></i> System Diagnostics & Event Log</h2>
+            <button class="btn btn-xs btn-outline" onclick="ArmControl.clearEventLog()">Clear Log</button>
+          </div>
+          <div class="card-body">
+            <div class="diagnostic-bar">
+              <div class="diag-item">
+                <span class="diag-label">Watchdog State:</span>
+                <span class="diag-val" id="diag-watchdog">IDLE</span>
+              </div>
+              <div class="diag-item">
+                <span class="diag-label">Max Temp Threshold:</span>
+                <span class="diag-val">70.0 °C</span>
+              </div>
+              <div class="diag-item">
+                <span class="diag-label">Last Command:</span>
+                <span class="diag-val" id="diag-last-cmd">None</span>
+              </div>
+              <div class="diag-item">
+                <span class="diag-label">Telemetry Data Age:</span>
+                <span class="diag-val" id="diag-data-age">0 ms</span>
+              </div>
+              <div class="diag-item">
+                <span class="diag-label">Active Fault:</span>
+                <span class="diag-val fault-text" id="diag-fault-reason">None</span>
+              </div>
+            </div>
+
+            <div class="event-log-container" id="event-log-container">
+              <!-- Timestamped log entries -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </div>
 
   <!-- TOAST NOTIFICATIONS CONTAINER -->
   <div class="toast-container" id="toast-container"></div>
 
-  <!-- JavaScript Modules -->
-  <script src="js/telemetry.js"></script>
-  <script src="js/arm.js"></script>
-  <script src="js/app.js"></script>
+  <!-- JavaScript Modules with Cache-Busting Versioning -->
+  <script src="js/arm3d.js?v=physical-v3"></script>
+  <script src="js/telemetry.js?v=physical-v3"></script>
+  <script src="js/arm.js?v=physical-v3"></script>
+  <script src="js/app.js?v=physical-5dof-v3"></script>
 </body>
 </html>

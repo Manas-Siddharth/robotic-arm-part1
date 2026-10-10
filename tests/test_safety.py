@@ -67,7 +67,7 @@ def test_watchdog_timeout_during_active_control():
     safety = SafetyMonitor(arm, config)
 
     # Initiate active control
-    safety.record_command()
+    safety.start_control_session()
     assert safety.check_safety()["safe"] is True
 
     # Wait >0.2s during active control without a command
@@ -90,7 +90,7 @@ def test_watchdog_cannot_be_bypassed_by_enabling_torque():
     arm.connect()
     safety = SafetyMonitor(arm, config)
 
-    safety.record_command()
+    safety.start_control_session()
     time.sleep(0.3)
     safety.check_safety()
     assert safety.fault_latched is True
